@@ -71,7 +71,7 @@ client(){
   local socat_pid="${!}"
   trap "rm -f ${lock}; pkill -s $$" exit
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
-  # Failure to ping server, triggers autoreconnect.
+  # Failure to ping the server triggers reconnect.
   while sleep 7; do
     flock -nE0 "${lock}" "${script_file}" -c pub "${pairing}" "ping" || break
   done && kill "${socat_pid}" && client "${@}"
@@ -127,6 +127,7 @@ _forwardee(){
 update(){
   local tmp="$(mktemp /tmp/XXXXX.tunnel.update)"
   curl -sfSNL -o "${tmp}" https://raw.githubusercontent.com/SomajitDey/tunnel/dev/tunnel
+  chmod +x "${tmp}"
   mv "${tmp}" "${script_file}"
 }; export -f update
 
@@ -138,7 +139,7 @@ showhelp(){
   echo "
   ${script_file} [-ivuh] [-a <access-key>] [<local-port> [<peer-ID:peer-port>]]
   Options:
-    -i  ID
+    -i  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
     -v  Version
     -u  Update
     -h  Help
