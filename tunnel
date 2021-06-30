@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+export script_file="${BASH_SOURCE}"
+export script_call="${0}"
+
+# Brief: Tunnel MVP - Local port forwarding
+# TODO: Remote port forwarding
+
+hmac(){
+  # Usage: hmac <key in hex> <data to be hashed in hex>
+  # The data can also be provided through stdin if not passed as parameter
+  local key="${1}" data="${2}"
+  [[ -n "${data}" ]] || read -rd '' data
+  echo -n "${data}" | xxd -r -p | openssl dgst -sha1 -mac hmac -macopt hexkey:"${key}" | cut -d ' ' -f 2
+}; export -f hmac
+
+sha1(){
+  # Usage: sha1 <string1> <string2>...
+  local string="${@}"
+  sha1sum < <(echo -n "${string}") | cut -d ' ' -f 1
+}; export -f sha1
+
+digest(){
+  # Brief: Generate hex digest of given strings
+  # Usage: digest <string1> <string2>...
+  local val="$(sha1 "${@}")"
+  local key="$(sha1 "TUNNEL_KEY" "${TUNNEL_KEY}")"
+  hmac "${key}" "${val}"
+}; export -f digest
+
+genID(){
+  # Brief: Generate ID unique to localhost and user. Should also work on virtual systems / Heroku dynos.
+  # Usage: genID
+  local MAC="$(ip link show eth0 | grep link/ether | awk '{print $2}')"
+  local val="$(sha1 "${MAC}")"
+  local key="$(sha1 "${HOSTNAME}" "${USER}" "${HOME}")"
+  hmac "${key}" "${val}" | xxd -r -p | base64
+}; export -f genID
+
+duplex(){
+  # Brief: Create duplex (bi-directional) connection to given channels
+  # Usage: duplex <read channel> <write channel>
+  local rchan="${1}" wchan="${2}"
+  socat STDIO "EXEC:curl -sfN https\://ppng.io/${rchan}!!EXEC:curl -sfNT- -o /dev/null https\://ppng.io/${wchan}"
+}; export -f duplex
+
+pub(){
+  # Brief: Publish given string to given channel
+  # Usage: pub <channel> <string>
+  local chan="${1}" msg="${2}"
+  curl -sfNd "${msg}" "https://ppng.io/${chan}"
+}>/dev/null; export -f pub
+
+sub(){
+  # Brief: Read from given channel
+  # Usage: sub <channel>
+  local chan="${1}"
+  curl -sfN "https://ppng.io/${chan}"
+}; export -f sub
+
+client(){
+  # Brief: Set up local port forwarding to peer and keep the connection(s) alive
+  # Usage: client <local_port> <peer_ID:peer_port>
+  if [[ -n "${2}" ]]; then local self="$(genID):${1}" peer="${2}"; else echo "tunnel-err: Missing peer"; return 1;fi
+  local peer_addr="$(digest "${peer}")"
+  local -i dial_count=0; echo "tunnel-client: Dialing..."
+  until pub "${peer_addr}" "${self}"; do echo "$(tput cuu1)tunnel-client: Dialing...${dial_count}"; ((dial_count++));done
+  echo "$(tput cuu1; tput ed)tunnel-client: Forwarding localhost:${self##*:} to ${peer}..."
+  socat "TCP4-LISTEN:${self##*:},reuseaddr,fork" EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}"
+}>&2; export -f client
+
+server(){
+  # Brief: Listen to incoming connections and forward to local port
+  # Usage server <local_port>
+  if [[ -n "${1}" ]]; then local self="$(genID):${1}"; else echo "tunnel-err: Missing local_port" >&2; return 1;fi
+  local self_addr="$(digest "${self}")" peer
+  local loop=true; trap "loop=false; pkill -s $$" INT TERM QUIT HUP
+  echo "tunnel-server: PID=${BASHPID}; Started: $(date)"
+  echo "tunnel-server: Listening for incoming connections to localhost:${self##*:}..."
+  local -i req_count=0
+  while "${loop}"; do
+    peer="$(sub "${self_addr}")" || continue
+    _forwardee "${peer}" "${self}" &
+    echo -e "tunnel-request: ${req_count}) ${peer}; Handler-PID: ${!}\n"
+    ((req_count++))
+  done
+}>&2; export -f server
+
+_forward(){
+  # Brief: Connection manager for client. Called by function: `client`. Type: subshell proc.
+  # Usage: _forward <self_ID:local_port> <peer_ID:peer_port>
+  local self="${1}" peer="${2}"
+  local source="${SOCAT_PEERADDR}:${SOCAT_PEERPORT}"
+  local pairing="$(digest "${self}" "${peer}")"
+  pub "${pairing}" "${source}" || return 1
+  echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
+  local wchan="$(digest "${source}" "${self}" "${peer}")" # Out Stream: Source -> Self -> Peer
+  local rchan="$(digest "${peer}" "${self}" "${source}")" # In Stream: Peer -> Self -> Source
+  duplex "${rchan}" "${wchan}" || return 2
+}; export -f _forward
+
+_forwardee(){
+  # Brief: Connection manager for server. Called by function: `server`. Type: subshell proc.
+  # Usage: _forwardee <peer_ID:peer_port> <self_ID:local_port>
+  local peer="${1}" self="${2}"
+  local pairing="$(digest "${peer}" "${self}")"
+  local loop=true; trap "loop=false; pkill -s $$" INT TERM QUIT HUP
+  local source
+  while "${loop}";do
+    source="$(sub "${pairing}")" || continue
+    local rchan="$(digest "${source}" "${peer}" "${self}")" # In Stream: Source -> Peer -> Self
+    local wchan="$(digest "${self}" "${peer}" "${source}")" # Out Stream: Self -> Peer-> Source
+    socat "EXEC:${script_file} -c duplex ${rchan} ${wchan}" "TCP:localhost:${self##*:}" &
+    echo -e "tunnel-connect: ${source} <--> ${peer} <--> ${self}\nsocat-PID: ${!}\n"
+  done
+}>&2; export -f _forwardee
+
+main(){
+  local opt subcommand
+  while getopts a:cihuv opt; do
+    case "${opt}" in
+      a) export TUNNEL_KEY="${OPTARG}";;
+      c) subcommand="set";;
+      i) "${script_file}" -c genID ; exit;;
+      h) "${script_file}" -c help ; exit;;
+      u) "${script_file}" -c update ; exit;;
+      v) "${script_file}" -c version ; exit;;
+    esac
+  done
+  shift "$((OPTIND-1))"
+  if [[ -v subcommand ]]; then ${@}; exit "${?}";fi
+  if [[ -n "${2}" ]]; then
+    client "${@}"
+  elif [[ -n "${1}" ]]; then
+    server "${1}"
+  else
+    about
+  fi
+  exit "${?}"
+}; export -f main
+
+[[ "${script_call}" == "${script_file}" ]] && main "${@}" # So that script doesn't run `main` when sourced
