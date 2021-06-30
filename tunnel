@@ -69,7 +69,7 @@ client(){
   local lock="/tmp/${pairing}"
   socat "TCP4-LISTEN:${self##*:},reuseaddr,fork" EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
   local socat_pid="${!}"
-  trap "rm -f ${lock}; kill ${socat_pid}" return
+  trap "rm -f ${lock}; pkill -s $$" exit
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
   # Failure to ping server, triggers autoreconnect.
   while sleep 7; do
@@ -83,7 +83,7 @@ server(){
   if [[ -n "${1}" ]]; then local self="$(genID):${1}"; else echo "tunnel-err: Missing local_port" >&2; return 1;fi
   local self_addr="$(digest "${self}")" peer
   local loop=true; trap "loop=false; pkill -s $$" INT TERM QUIT HUP
-  echo "tunnel-server: PID=${BASHPID}; Started: $(date)"
+  echo -e "\ntunnel-server: PID=${BASHPID}; Started: $(date)"
   echo -e "tunnel-server: Listening for incoming connections to localhost:${self##*:}...\n"
   local -i req_count=0
   while "${loop}"; do
@@ -100,7 +100,7 @@ _forward(){
   local self="${1}" peer="${2}"
   local source="${SOCAT_PEERADDR}:${SOCAT_PEERPORT}"
   local pairing="$(digest "${self}" "${peer}")"
-  flock -w 1 /tmp/${pairing} ${script_file} -c pub "${pairing}" "${source}" || return "${?}"
+  flock -w 1 "/tmp/${pairing}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
   echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
   local wchan="$(digest "${source}" "${self}" "${peer}")" # Out Stream: Source -> Self -> Peer
   local rchan="$(digest "${peer}" "${self}" "${source}")" # In Stream: Peer -> Self -> Source
@@ -124,6 +124,44 @@ _forwardee(){
   done
 }>&2; export -f _forwardee
 
+update(){
+  local tmp="$(mktemp /tmp/XXXXX.tunnel.update)"
+  curl -sfSNL -o "${tmp}" https://raw.githubusercontent.com/SomajitDey/tunnel/dev/tunnel
+  mv "${tmp}" "${script_file}"
+}; export -f update
+
+version(){
+  echo 0.0.0
+}; export -f version
+
+showhelp(){
+  echo "
+  ${script_file} [-ivuh] [-a <access-key>] [<local-port> [<peer-ID:peer-port>]]
+  Options:
+    -i  ID
+    -v  Version
+    -u  Update
+    -h  Help
+    -a  Authorize with <access-key>. Can use environment variable TUNNEL_KEY instead.
+  Example:
+    # Generate ID to be announced to peers
+      ${script_file} -i
+    # Expose local port 4001 (default IPFS port) for peers to connect
+      TUNNEL_KEY='shared secret' ${script_file} 4001
+    # Forward local port 9090 to port 4001 of peer
+      ${script_file} -a 'shared secret' 9090 'peerID:4001'
+  "
+}; export -f showhelp
+
+about(){
+  echo \
+"  Tunnel: Secure, multiplexed, TCP port forwarder with NAT/firewall traversal through relay(s)
+  GitHub: SomajitDey/tunnel
+  Copyright (C) 2021 Somajit Dey
+  License: GNU GPL v3 or later
+  Help: ${script_file} -h"
+}; export -f about
+
 main(){
   local opt subcommand
   while getopts a:cihuv opt; do
@@ -131,7 +169,7 @@ main(){
       a) export TUNNEL_KEY="${OPTARG}";;
       c) subcommand="set";;
       i) "${script_file}" -c genID ; exit;;
-      h) "${script_file}" -c help ; exit;;
+      h) "${script_file}" -c showhelp ; exit;;
       u) "${script_file}" -c update ; exit;;
       v) "${script_file}" -c version ; exit;;
     esac
