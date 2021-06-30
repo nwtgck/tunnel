@@ -62,25 +62,20 @@ client(){
   # Usage: client <local_port> <peer_ID:peer_port>
   if [[ -n "${2}" ]]; then local self="$(genID):${1}" peer="${2}"; else echo "tunnel-err: Missing peer"; return 1;fi
   local peer_addr="$(digest "${peer}")"
-  local -i dial_count=0; echo -en "tunnel-client: Dialing...\r"
+  local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
   until pub "${peer_addr}" "${self}" 2>/dev/null; do echo -en "tunnel-client: Dialing...${dial_count}\r"; ((dial_count++));done
   echo -e "tunnel-client: Forwarding localhost:${self##*:} to ${peer}...\n"
-#  trap "echo received INT ; exec ${script_file} -a '${TUNNEL_KEY}' -c client ${self##*:} ${peer}" INT
-#  trap "echo received SIGINT ; client ${@}" INT
+  local pairing="$(digest "${self}" "${peer}")"
+  local lock="/tmp/${pairing}"
   socat "TCP4-LISTEN:${self##*:},reuseaddr,fork" EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
   local socat_pid="${!}"
-  _keepalive 2 "$$" "$(digest "${self}" "${peer}")" &
-  wait "${!}" && kill -9 "${socat_pid}" && client "${@}"
+  trap "rm -f ${lock}; kill ${socat_pid}" return
+  # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
+  # Failure to ping server, triggers autoreconnect.
+  while sleep 7; do
+    flock -nE0 "${lock}" "${script_file}" -c pub "${pairing}" "ping" || break
+  done && kill "${socat_pid}" && client "${@}"
 }>&2; export -f client
-
-_keepalive(){
-  # Brief: Ping given pairing at given intervals. Send SIGUSR to given PID (of client) on failure.
-  # Usage: _keepalive <seconds> <PID> <pairing>
-  local time="${1}" pid="${2}" pairing="${3}"
-  while sleep "${time}" && kill -0 "${pid}"; do
-    flock -nE0 /tmp/${pairing} ${script_file} -c pub "${pairing}" "ping" || return 0
-  done
-}; export -f _keepalive
 
 server(){
   # Brief: Listen to incoming connections and forward to local port
