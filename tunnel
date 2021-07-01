@@ -84,7 +84,8 @@ server(){
   local self_addr="$(digest "${self}")" peer
   local loop=true; trap "loop=false; pkill -s $$" INT TERM QUIT HUP
   echo -e "\ntunnel-server: PID=${BASHPID}; Started: $(date)"
-  echo -e "tunnel-server: Listening for incoming connections to localhost:${self##*:}...\n"
+  echo "tunnel-server: Listening for incoming connections to localhost:${self##*:}..."
+  echo -e "tunnel-server: For peers to connect, share $(tput smso)\"${self}\"$(tput rmso) & your secret key (if any)\n"
   local -i req_count=0
   while "${loop}"; do
     peer="$(sub "${self_addr}")" || continue
@@ -126,9 +127,9 @@ _forwardee(){
 
 update(){
   local tmp="$(mktemp /tmp/XXXXX.tunnel.update)"
-  curl -sfSNL -o "${tmp}" https://raw.githubusercontent.com/SomajitDey/tunnel/dev/tunnel
+  curl -sfSNL -o "${tmp}" https://raw.githubusercontent.com/SomajitDey/tunnel/main/tunnel || return "${?}"
   chmod +x "${tmp}"
-  mv "${tmp}" "${script_file}"
+  mv -f "${tmp}" "${script_file}" 2>/dev/null || sudo mv -f "${tmp}" "${script_file}"
 }; export -f update
 
 version(){
@@ -137,7 +138,7 @@ version(){
 
 showhelp(){
   echo "
-  ${script_file} [-ivuh] [-a <access-key>] [<local-port> [<peer-ID:peer-port>]]
+  tunnel [-ivuh] [-a <access-key>] [<local-port> [<peer-ID:peer-port>]]
   Options:
     -i  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
     -v  Version
@@ -146,17 +147,18 @@ showhelp(){
     -a  Authorize with <access-key>. Can use environment variable TUNNEL_KEY instead.
   Example:
     # Generate ID to be announced to peers
-      ${script_file} -i
-    # Expose local port 4001 (default IPFS port) for peers to connect
-      TUNNEL_KEY='shared secret' ${script_file} 4001
+        tunnel -i
+    # Expose local port 4001 (default IPFS port) for peers to connect to
+        TUNNEL_KEY='shared secret' tunnel 4001
     # Forward local port 9090 to port 4001 of peer
-      ${script_file} -a 'shared secret' 9090 'peerID:4001'
+        tunnel -a 'shared secret' 9090 'peerID:4001'
   "
 }; export -f showhelp
 
 about(){
   echo \
 "  Tunnel: Secure, multiplexed, TCP port forwarder with NAT/firewall traversal through relay(s)
+  Version: $(version)
   GitHub: SomajitDey/tunnel
   Copyright (C) 2021 Somajit Dey
   License: GNU GPL v3 or later

@@ -1,6 +1,6 @@
 # Tunnel
 
-Secure, multiplexed, TCP-port-forwarder using [piping-server](https://github.com/nwtgck/piping-server) by [@nwtgck](https://github.com/nwtgck) as relay. Designed mainly for p2p connections between peers behind (multiple) NAT/firewalls.
+Secure, multiplexed, TCP port forwarder using [piping-server](https://github.com/nwtgck/piping-server) by [@nwtgck](https://github.com/nwtgck) as relay. Designed mainly for p2p connections between peers behind (multiple) NAT/firewalls.
 
 # Features
 
@@ -11,6 +11,7 @@ Secure, multiplexed, TCP-port-forwarder using [piping-server](https://github.com
 5. Resilience: Peers auto-reconnect in the face of intermittent connectivity.
 6. No superuser privilege required.
 7. [Option to host your own relay server (easily and for free)](https://github.com/nwtgck/piping-server#self-host-on-free-services).
+8. KISS: Just a single, small, portable, shell-script.
 
 # Command-line
 
@@ -33,9 +34,9 @@ tunnel [-ivuh] [-a <access-key>] [<local-port> [<peer-ID:peer-port>]]
     Forward local port 9090 to port 4001 of peer
       `tunnel -a 'shared secret' 9090 'peerID:4001'`
 
-# Dependency
+# Dependency/Portability
 
-`bash` and standard GNU tools including `socat`.
+This program is simply an executable `bash` script depending on standard GNU tools including `socat`, `openssl`, `curl`, `mktemp`, `cut`, `awk`,  `sed` , `flock`, `pkill` etc. that are readily available on standard Linux distros.
 
 # Applications
 
@@ -49,6 +50,7 @@ tunnel [-ivuh] [-a <access-key>] [<local-port> [<peer-ID:peer-port>]]
 - [gsocket](https://github.com/hackerschoice/gsocket)
 - [ipfs p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) with [circuit-relay enabled](https://gist.github.com/SomajitDey/7c17998825bb105466ef2f9cefdc6d43)
 - [go-piping-duplex](https://github.com/nwtgck/go-piping-duplex)
+- [pipeto.me](https://pipeto.me)
 - [uplink](https://getuplink.de)
 - [localhost.run](https://localhost.run/)
 - [ngrok](https://ngrok.io)
