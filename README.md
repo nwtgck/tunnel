@@ -16,15 +16,16 @@ Secure, multiplexed, TCP port forwarder using [piping-server](https://github.com
 # Command-line
 
 ```bash
-tunnel [-ivuh] [-a <access-key>] [<local-port> [<peer-ID:peer-port>]]
+tunnel [-ivuh] [-a <access-key>] [-p <piping-server>] [<local-port> [<peer-ID:peer-port>]]
 ```
 
 **Options:**
     **-i**  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
     **-v**  Version
-    **-u**  Update
+    **-u**  Update to latest version
     **-h**  Help
     **-a**  Pass the shared secret. Can use environment variable TUNNEL_KEY instead.
+    **-p**  Pass the piping-server URL. Can use environment variable TUNNEL_RELAY instead. Default: https://ppng.io
 
 **Example:**
     Generate ID to be announced to peers
@@ -34,9 +35,35 @@ tunnel [-ivuh] [-a <access-key>] [<local-port> [<peer-ID:peer-port>]]
     Forward local port 9090 to port 4001 of peer
       `tunnel -a 'shared secret' 9090 'peerID:4001'`
 
+# Installation
+
+Download with:
+
+```bash
+curl -LO https://raw.githubusercontent.com/SomajitDey/tunnel/main/tunnel
+```
+
+Make it executable:
+
+```bash
+chmod +x ./tunnel
+```
+
+Then install globally with:
+
+```bash
+./tunnel -c install
+```
+
+If you don't have `sudo` privilege, you can install locally instead:
+
+```bash
+./tunnel -c install -l
+```
+
 # Dependency/Portability
 
-This program is simply an executable `bash` script depending on standard GNU tools including `socat`, `openssl`, `curl`, `mktemp`, `cut`, `awk`,  `sed` , `flock`, `pkill` etc. that are readily available on standard Linux distros.
+This program is simply an executable `bash` script depending on standard GNU tools including `socat`, `openssl`, `curl`, `mktemp`, `cut`, `awk`,  `sed` , `flock`, `pkill`, `dd`, `xxd` etc. that are readily available on standard Linux distros.
 
 # Applications
 
