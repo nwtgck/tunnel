@@ -190,6 +190,7 @@ main(){
       h) "${script_file}" -c showhelp ; exit;;
       u) "${script_file}" -c update ; exit;;
       v) "${script_file}" -c version ; exit;;
+      *) exit 1;;
     esac
   done
   shift "$((OPTIND-1))"
