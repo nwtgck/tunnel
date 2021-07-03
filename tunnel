@@ -3,6 +3,7 @@
 piping_server=https://ppng.io
 
 export TUNNEL_RELAY="${TUNNEL_RELAY:-"${piping_server%/}"}"
+export L4="TCP" # L4 stands for Layer 4 (Transport Layer) of the OSI model (i.e. TCP/UDP)
 export script_file="${BASH_SOURCE}"
 export script_call="${0}"
 
@@ -63,13 +64,13 @@ client(){
   # Usage: client <local_port> <peer_ID:peer_port>
   if [[ -n "${2}" ]]; then local self="$(genID):${1}" peer="${2}"; else echo "tunnel-err: Missing peer"; return 1;fi
   local peer_addr="$(digest "${peer}")"
-  local sess_key="$(dd if=/dev/urandom count=1 bs=20 2>/dev/null | xxd -p)" # Random 160-bit session key
+  local sess_key="$(dd if=/dev/urandom count=1 bs=20 2>/dev/null | base64)" # Random 160-bit session key
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
   until pub "${peer_addr}" "${self} ${sess_key}" 2>/dev/null; do echo -en "tunnel-client: Dialing...${dial_count}\r"; ((dial_count++));done
-  echo -e "tunnel-client: Forwarding localhost:${self##*:} to ${peer}. Session-key=${sess_key}\n"
+  echo -e "tunnel-client: Forwarding localhost:${self##*:} to ${peer}. Session-key ${sess_key}\n"
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
   local lock="/tmp/${pairing}"
-  socat "TCP4-LISTEN:${self##*:},reuseaddr,fork" EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:} ${sess_key}" &
+  socat "${L4}-LISTEN:${self##*:},reuseaddr,fork" EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:} ${sess_key}" &
   local socat_pid="${!}"
   trap "rm -f ${lock}; pkill -s $$" exit
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
@@ -95,7 +96,7 @@ server(){
     buffer="$(sub "${self_addr}")" || continue
     local peer="${buffer%% *}" sess_key="${buffer##* }"
     _forwardee "${peer}" "${self}" "${sess_key}" &
-    echo -e "tunnel-request: ${req_count}) ${peer} Session-key=${sess_key} Handler-PID= ${!}\n"
+    echo -e "tunnel-request [#${req_count}]: (From) ${peer} (Session-Key) ${sess_key} (Handler-PID) ${!}\n"
     ((req_count++))
   done
 }>&2; export -f server
@@ -125,16 +126,18 @@ _forwardee(){
     [[ "${source}" != "ping" ]] || continue
     local rchan="$(digest "${source}" "${peer}" "${self}")" # In Stream: Source -> Peer -> Self
     local wchan="$(digest "${self}" "${peer}" "${source}")" # Out Stream: Self -> Peer-> Source
-    socat "EXEC:${script_file} -c duplex ${rchan} ${wchan}" "TCP:localhost:${self##*:}" &
+    socat "EXEC:${script_file} -c duplex ${rchan} ${wchan}" "${L4}:localhost:${self##*:}" &
     echo -e "tunnel-connect: ${source} <--> ${peer} <--> ${self}\nsocat-PID: ${!}\n"
   done
 }>&2; export -f _forwardee
 
 update(){
-  local tmp="$(mktemp /tmp/XXXXX.tunnel.update)"
-  curl -sfSNL -o "${tmp}" https://raw.githubusercontent.com/SomajitDey/tunnel/main/tunnel || return "${?}"
+  # Usage: update [branch]
+  local tmp="$(mktemp /tmp/XXXXX.tunnel.update)" branch="${1:-main}"
+  curl -sfSNL -o "${tmp}" https://raw.githubusercontent.com/SomajitDey/tunnel/"${branch}"/tunnel || return "${?}"
   chmod +x "${tmp}"
-  mv -f "${tmp}" "${script_file}" 2>/dev/null || sudo mv -f "${tmp}" "${script_file}"
+  mv -f "${tmp}" "${script_file}" 2>/dev/null || sudo mv -f "${tmp}" "${script_file}" &&\
+  echo "Updated to v$(${script_file} -v)"
 }; export -f update
 
 version(){
@@ -143,13 +146,13 @@ version(){
 
 showhelp(){
   echo "
-  tunnel [-ivuh] [-p <piping-server>] [-a <access-key>] [<local-port> [<peer-ID:peer-port>]]
+  tunnel [-ivuh] [-p <piping-server>] [-k <access-key>] [<local-port> [<peer-ID:peer-port>]]
   Options:
     -i  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
     -v  Version
-    -u  Update
+    -u  UDP instead of the default TCP
     -h  Help
-    -a  Authorize with <access-key>. Can use environment variable TUNNEL_KEY instead.
+    -k  Authorize with <access-key>. Can use environment variable TUNNEL_KEY instead.
     -p  Choose <piping-server> as the relay. Can use environment variable TUNNEL_RELAY instead.
   Example:
     # Generate ID to be announced to peers
@@ -157,38 +160,47 @@ showhelp(){
     # Expose local port 4001 (default IPFS port) for peers to connect to
         TUNNEL_KEY='shared secret' tunnel 4001
     # Forward local port 9090 to port 4001 of peer
-        tunnel -a 'shared secret' 9090 'peerID:4001'
+        tunnel -k 'shared secret' 9090 'peerID:4001'
   "
 }; export -f showhelp
 
 about(){
   echo \
-"  Tunnel: Secure, multiplexed, TCP port forwarder with NAT/firewall traversal through relay(s)
+"  Tunnel: Peer-to-peer, secure, multiplexed, TCP/UDP port forwarder with NAT/firewall traversal through relay(s)
   Version: $(version)
   GitHub: SomajitDey/tunnel
   Copyright (C) 2021 Somajit Dey
   License: GNU GPL v3 or later
-  Help: ${script_file} -h"
+  Help: tunnel -h"
 }; export -f about
 
 install(){
+  # Usage: install [-l]
   local opt OPTIND=1; getopts l opt
   case "${opt}" in
-    l) echo "alias tunnel=${script_file}" >> ~/.bashrc ;;
-    *) sudo mv -i "${script_file}" /usr/local/bin ;;
-  esac && echo "Installed. Check with command: tunnel"
+    l) 
+      local dest="${HOME}/.bin"
+      local cmd="export PATH=\"\${PATH}:${dest}\""
+      mkdir -p "${dest}"
+      cp -i "${script_file}" "${dest}" &&\
+      (grep -q "^${cmd}" "${HOME}/.bashrc" || echo "${cmd}" >> "${HOME}/.bashrc") && eval "${cmd}"
+      ;;
+    *) 
+      sudo cp -i "${script_file}" /usr/local/bin
+      ;;
+  esac && echo "Installed. Check with command (may need to open a new terminal): tunnel"
 }; export -f install
 
 main(){
   local opt subcommand
-  while getopts a:p:cihuv opt; do
+  while getopts k:p:cihuv opt; do
     case "${opt}" in
-      a) export TUNNEL_KEY="${OPTARG}";;
+      k) export TUNNEL_KEY="${OPTARG}";;
       p) export TUNNEL_RELAY="${OPTARG}";;
+      u) export L4="UDP";;
       c) subcommand="set";;
       i) "${script_file}" -c genID ; exit;;
       h) "${script_file}" -c showhelp ; exit;;
-      u) "${script_file}" -c update ; exit;;
       v) "${script_file}" -c version ; exit;;
       *) exit 1;;
     esac
