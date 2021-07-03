@@ -21,21 +21,33 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 tunnel [-ivuh] [-k <access-key>] [-p <piping-server>] [<local-port> [<peer-ID:peer-port>]]
 ```
 
-**Options:**
-    **-i**  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
-    **-v**  Version
-    **-u**  UDP instead of the default TCP
-    **-h**  Help
-    **-k**  Pass the shared secret key. Can use environment variable TUNNEL_KEY instead.
-    **-p**  Pass the piping-server URL. Can use environment variable TUNNEL_RELAY instead. Default: https://ppng.io
+**Options:** 
+
+​	**-i**  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
+
+​	**-v**  Version
+
+​	**-u**  UDP instead of the default TCP
+
+​	**-h**  Help
+
+​	**-k**  Pass the shared secret key. Can use environment variable TUNNEL_KEY instead.
+
+​	**-p**  Pass the piping-server URL. Can use environment variable TUNNEL_RELAY instead. Default: https://ppng.io
 
 **Example:**
-    Generate ID to be announced to peers
-      `tunnel -i`
-    Expose local TCP port 4001 (default IPFS port) for peers to connect to
-      `TUNNEL_KEY='shared secret' tunnel 4001`
-    Forward local port 9090 to port 4001 of peer
-      `tunnel -k 'shared secret' 9090 'peerID:4001'`
+
+Generate ID to be announced to peers:
+
+`tunnel -i`
+
+Expose local TCP port 9090 for peers to connect to:
+
+`TUNNEL_KEY='shared secret' tunnel 9090`
+
+Forward local UDP port 8989 to port 9124 of peer:
+
+`tunnel -uk 'shared secret' 8989 'peerID:9124'`
 
 # Installation and Updating
 
