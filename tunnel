@@ -7,6 +7,8 @@ export L4="${L4:-TCP}" # L4 stands for Layer 4 (Transport Layer) of the OSI mode
 export script_file="${BASH_SOURCE}"
 export script_call="${0}"
 
+#trap "pkill -P \${BASHPID}; exit" INT TERM QUIT HUP
+
 hmac(){
   # Usage: hmac <key in hex> <data to be hashed in hex>
   # The data can also be provided through stdin if not passed as parameter
@@ -55,6 +57,7 @@ pub(){
 sub(){
   # Brief: Read from given channel
   # Usage: sub <channel>
+  #trap "pkill -P \${BASHPID}; return" INT TERM QUIT HUP
   local chan="${1}"
   curl -sfSN "${TUNNEL_RELAY}/${chan}"
 }; export -f sub
@@ -63,7 +66,7 @@ client(){
   # Brief: Set up local port forwarding to peer and keep the connection(s) alive
   # Usage: client <local_port> <peer_ID:peer_port>
   if [[ -n "${2}" ]]; then local self="$(genID):${1}" peer="${2}"; else echo "tunnel-err: Missing peer"; return 1;fi
-  local peer_addr="$(digest "${peer}")"
+  local peer_addr="$(digest "${peer}" "${L4}")"
   local sess_key="$(dd if=/dev/urandom count=1 bs=20 2>/dev/null | base64)" # Random 160-bit session key
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
   until pub "${peer_addr}" "${self} ${sess_key}" 2>/dev/null; do echo -en "tunnel-client: Dialing...${dial_count}\r"; ((dial_count++));done
@@ -72,26 +75,25 @@ client(){
   local lock="/tmp/${pairing}"
   socat "${L4}-LISTEN:${self##*:},reuseaddr,fork" EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:} ${sess_key}" &
   local socat_pid="${!}"
-  trap "rm -f ${lock}; pkill -s $$" exit INT TERM QUIT HUP
+  trap "pkill -P \${BASHPID}; rm -f ${lock}; return" INT TERM QUIT HUP
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
   # Failure to ping the server triggers reconnect.
   while sleep 7; do
     flock -nE0 "${lock}" "${script_file}" -c pub "${pairing}" "ping" || break
-  done && kill "${socat_pid}" && client "${@}"
+  done && kill "${socat_pid}" && rm -f "${lock}" && client "${@}"
 }>&2; export -f client
 
 server(){
   # Brief: Listen to incoming connections and forward to local port
   # Usage server <local_port>
   if [[ -n "${1}" ]]; then local self="$(genID):${1}"; else echo "tunnel-err: Missing local_port" >&2; return 1;fi
-  local self_addr="$(digest "${self}")"
-  local loop=true; trap "loop=false; pkill -s $$" INT TERM QUIT HUP
+  local self_addr="$(digest "${self}" "${L4}")"
   echo -e "\ntunnel-server: PID=${BASHPID}; Started: $(date)"
   echo "tunnel-server: Listening for incoming connections to localhost:${self##*:}..."
   echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
   # Using command with tput above, protects against unavailablity of the tput command 
   local -i req_count=0
-  local buffer
+  local buffer loop=true; trap "loop=false; pkill -P \${BASHPID}; return" INT TERM QUIT HUP
   while "${loop}"; do
     buffer="$(sub "${self_addr}")" || continue
     local peer="${buffer%% *}" sess_key="${buffer##* }"
@@ -119,7 +121,7 @@ _forwardee(){
   # Usage: _forwardee <peer_ID:peer_port> <self_ID:local_port> <session_key>
   local peer="${1}" self="${2}" sess_key="${3}"
   local pairing="$(digest "${peer}" "${self}" "${sess_key}")"
-  local loop=true; trap "loop=false; pkill -s $$" INT TERM QUIT HUP
+  local loop=true; trap "loop=false; pkill -P \${BASHPID}; return" INT TERM QUIT HUP
   local source
   while "${loop}";do
     source="$(sub "${pairing}")" || return "${?}"
@@ -155,21 +157,43 @@ version(){
 
 showhelp(){
   echo "
-  tunnel [-ivuh] [-p <piping-server>] [-k <access-key>] [<local-port> [<peer-ID:peer-port>]]
+  Client (Forwarder): tunnel [options] [-b <local-port>] <peer-ID:peer-port>
+  Server (Forwardee): tunnel [options] <local-port>
+
+  Update: tunnel -c update
+  Install locally: tunnel -c install [-l]
+  Install system-wide (sudo priviledge required): tunnel -c install
+  
   Options:
     -i  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
     -v  Version
-    -u  UDP instead of the default TCP
+    -u  UDP instead of the default TCP. If client uses this option, server must use it too and vice versa.
     -h  Help
+    -l  Use <logfile> instead of default stderr. This makes the client/server run as daemon.
+    -b  Forward given <local_port>. If absent, client uses a random, unused port. Port used is shown at stdout.
     -k  Authorize with <access-key>. Can use environment variable TUNNEL_KEY instead.
     -p  Choose <piping-server> as the relay. Can use environment variable TUNNEL_RELAY instead.
-  Example:
+
+  Examples:
+
     # Generate ID to be announced to peers
         tunnel -i
-    # Expose local port 4001 (default IPFS port) for peers to connect to
-        TUNNEL_KEY='shared secret' tunnel 4001
-    # Forward local port 9090 to port 4001 of peer
-        tunnel -k 'shared secret' 9090 'peerID:4001'
+
+    # Expose local UDP port 4001 (default IPFS port) for peers to connect to
+        TUNNEL_KEY='shared secret' tunnel -u 4001
+
+    # Forward local UDP port 9090 to UDP port 4001 of peer
+        tunnel -uk 'long passphrase' -b 9090 'peerID:4001'
+
+    # Forward any random unused local TCP port to TCP peer_port
+        tunnel -k 'secret key' 'peerID:peer_port'
+
+    # Run server in daemon mode
+        tunnel -l \"/tmp/tunnel-log\" 22
+
+    # SSH to the above peer
+        tunnel -l /dev/null peerID:22 # This client will give forwarded local port at stdout
+        ssh user@localhost -p port_obtained_from_client
   "
 }; export -f showhelp
 
@@ -228,7 +252,7 @@ main(){
   case "${arg}" in
     +([[:digit:]]) )
       if [[ -v logfile ]]; then
-        server "${arg}" &> "${logfile}" & local pid="${!}"
+        "${script_file}" -c server "${arg}" &> "${logfile}" & local pid="${!}" ; disown
         echo -n "tunnel-server: daemon-pid=" >&2
         echo "${pid}"
       else
@@ -240,7 +264,7 @@ main(){
       echo -n "tunnel-client: port=" >&2
       echo "${local_port}"
       if [[ -v logfile ]]; then
-        client "${local_port}" "${arg}" &> "${logfile}" & local pid="${!}"
+        "${script_file}" -c client "${local_port}" "${arg}" &> "${logfile}" & local pid="${!}" ; disown
         echo -n "tunnel: client: daemon-pid=" >&2
         echo "${pid}"
       else
