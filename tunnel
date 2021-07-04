@@ -3,11 +3,9 @@
 piping_server=https://ppng.io
 
 export TUNNEL_RELAY="${TUNNEL_RELAY:-"${piping_server%/}"}"
-export L4="${L4:-TCP}" # L4 stands for Layer 4 (Transport Layer) of the OSI model (i.e. TCP/UDP)
+export TUNNEL_L4="${TUNNEL_L4:-TCP}" # L4 stands for Layer 4 (Transport Layer) of the OSI model (i.e. TCP/UDP)
 export script_file="${BASH_SOURCE}"
 export script_call="${0}"
-
-#trap "pkill -P \${BASHPID}; exit" INT TERM QUIT HUP
 
 hmac(){
   # Usage: hmac <key in hex> <data to be hashed in hex>
@@ -37,7 +35,8 @@ genID(){
   local MAC="$(ip link show eth0 | grep link/ether | awk '{print $2}')"
   local val="$(sha1 "${MAC}")"
   local key="$(sha1 "${HOSTNAME}" "${USER}" "${HOME}")"
-  hmac "${key}" "${val}" | xxd -r -p | base64
+  local id="$(hmac "${key}" "${val}" | xxd -r -p | base64)"
+  echo "${id//=/}" # 160 bit hash would always have a single trailing "=" in base64. So get rid of it.
 }; export -f genID
 
 duplex(){
@@ -57,7 +56,6 @@ pub(){
 sub(){
   # Brief: Read from given channel
   # Usage: sub <channel>
-  #trap "pkill -P \${BASHPID}; return" INT TERM QUIT HUP
   local chan="${1}"
   curl -sfSN "${TUNNEL_RELAY}/${chan}"
 }; export -f sub
@@ -65,17 +63,23 @@ sub(){
 client(){
   # Brief: Set up local port forwarding to peer and keep the connection(s) alive
   # Usage: client <local_port> <peer_ID:peer_port>
-  if [[ -n "${2}" ]]; then local self="$(genID):${1}" peer="${2}"; else echo "tunnel-err: Missing peer"; return 1;fi
-  local peer_addr="$(digest "${peer}" "${L4}")"
+  local self="$(genID):${1}" peer="${2}"
+  local peer_addr="$(digest "${peer}" "${TUNNEL_L4}")"
   local sess_key="$(dd if=/dev/urandom count=1 bs=20 2>/dev/null | base64)" # Random 160-bit session key
+
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
-  until pub "${peer_addr}" "${self} ${sess_key}" 2>/dev/null; do echo -en "tunnel-client: Dialing...${dial_count}\r"; ((dial_count++));done
+  until pub "${peer_addr}" "${self} ${sess_key}" 2>/dev/null;do
+    echo -en "tunnel-client: Dialing...${dial_count}\r"
+    ((dial_count++))
+  done
+
   echo -e "tunnel-client: Forwarding localhost:${self##*:} to ${peer}. Session-key ${sess_key}\n"
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
   local lock="/tmp/${pairing}"
-  socat "${L4}-LISTEN:${self##*:},reuseaddr,fork" EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:} ${sess_key}" &
+  socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
+    EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:} ${sess_key}" &
   local socat_pid="${!}"
-  trap "pkill -P \${BASHPID}; rm -f ${lock}; return" INT TERM QUIT HUP
+  trap "pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; rm -f \${lock}; return" INT TERM QUIT HUP
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
   # Failure to ping the server triggers reconnect.
   while sleep 7; do
@@ -86,8 +90,8 @@ client(){
 server(){
   # Brief: Listen to incoming connections and forward to local port
   # Usage server <local_port>
-  if [[ -n "${1}" ]]; then local self="$(genID):${1}"; else echo "tunnel-err: Missing local_port" >&2; return 1;fi
-  local self_addr="$(digest "${self}" "${L4}")"
+  local self="$(genID):${1}"
+  local self_addr="$(digest "${self}" "${TUNNEL_L4}")"
   echo -e "\ntunnel-server: PID=${BASHPID}; Started: $(date)"
   echo "tunnel-server: Listening for incoming connections to localhost:${self##*:}..."
   echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
@@ -128,7 +132,7 @@ _forwardee(){
     [[ "${source}" != "ping" ]] || continue
     local rchan="$(digest "${source}" "${peer}" "${self}")" # In Stream: Source -> Peer -> Self
     local wchan="$(digest "${self}" "${peer}" "${source}")" # Out Stream: Self -> Peer-> Source
-    socat "EXEC:${script_file} -c duplex ${rchan} ${wchan}" "${L4}:localhost:${self##*:}" &
+    socat "EXEC:${script_file} -c duplex ${rchan} ${wchan}" "${TUNNEL_L4}:localhost:${self##*:}" &
     echo -e "tunnel-connect: ${source} <--> ${peer} <--> ${self}\nsocat-PID: ${!}\n"
   done
 }>&2; export -f _forwardee
@@ -137,7 +141,7 @@ pscan(){
   # Brief: Give an unused, random, local TCP/UDP port for the client to listen to
   local port
   for port in $(seq 49152 65535 | tac);do
-    socat "${L4}:localhost:${port}" "SYSTEM:echo data" &>/dev/null || { echo "${port}" && return 0;}
+    socat "${TUNNEL_L4}:localhost:${port}" "SYSTEM:echo data" &>/dev/null || { echo "${port}" && return 0;}
   done
   return 1
 }; export -f pscan
@@ -145,6 +149,7 @@ pscan(){
 update(){
   # Usage: update [branch]
   local tmp="$(mktemp /tmp/XXXXX.tunnel.update)" branch="${1:-main}"
+  trap "rm -f ${tmp}" return
   curl -sfSNL -o "${tmp}" https://raw.githubusercontent.com/SomajitDey/tunnel/"${branch}"/tunnel || return "${?}"
   chmod +x "${tmp}"
   mv -f "${tmp}" "${script_file}" 2>/dev/null || sudo mv -f "${tmp}" "${script_file}" &&\
@@ -161,7 +166,7 @@ showhelp(){
   Server (Forwardee): tunnel [options] <local-port>
 
   Update: tunnel -c update
-  Install locally: tunnel -c install [-l]
+  Install locally: tunnel -c install -l
   Install system-wide (sudo priviledge required): tunnel -c install
   
   Options:
@@ -176,23 +181,23 @@ showhelp(){
 
   Examples:
 
-    # Generate ID to be announced to peers
+    # Generate node ID to be announced to peers
         tunnel -i
 
     # Expose local UDP port 4001 (default IPFS port) for peers to connect to
         TUNNEL_KEY='shared secret' tunnel -u 4001
 
     # Forward local UDP port 9090 to UDP port 4001 of peer
-        tunnel -uk 'long passphrase' -b 9090 'peerID:4001'
+        tunnel -uk 'shared secret' -b 9090 'peer_ID:4001'
 
     # Forward any random unused local TCP port to TCP peer_port
-        tunnel -k 'secret key' 'peerID:peer_port'
+        tunnel -k 'secret key' 'peer_ID:peer_port'
 
     # Run server in daemon mode
         tunnel -l \"/tmp/tunnel-log\" 22
 
     # SSH to the above peer
-        tunnel -l /dev/null peerID:22 # This client will give forwarded local port at stdout
+        tunnel -l /dev/null peer_ID:22 # This client will give forwarded local port at stdout
         ssh user@localhost -p port_obtained_from_client
   "
 }; export -f showhelp
@@ -234,7 +239,7 @@ main(){
     case "${opt}" in
       k) export TUNNEL_KEY="${OPTARG}";;
       p) export TUNNEL_RELAY="${OPTARG}";;
-      u) export L4="UDP";;
+      u) export TUNNEL_L4="UDP";;
       c) subcommand="set";;
       l) logfile="${OPTARG}";;
       b) local_port="${OPTARG}";;
@@ -259,7 +264,7 @@ main(){
         server "${arg}"
       fi
       ;;
-    +([[:alnum:]])=?(:+([[:digit:]])) )
+    +([[:alnum:]+/])?(:+([[:digit:]])) )
       local_port="${local_port:-"$(pscan)"}"
       echo -n "tunnel-client: port=" >&2
       echo "${local_port}"
@@ -277,4 +282,4 @@ main(){
   esac
 }; export -f main
 
-[[ "${script_call}" == "${script_file}" ]] && main "${@}" # So that script doesn't run `main` when sourced
+[[ "${script_call}" == "${script_file}" ]] && main "${@}" # So that the script doesn't run `main` when sourced

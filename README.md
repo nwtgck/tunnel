@@ -17,7 +17,7 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 
 # Command-line
 
-**ID:** Every node is given a unique ID -
+**<u>ID</u>:** Every node is given a unique ([base64](https://datatracker.ietf.org/doc/html/rfc2045#page-24)) ID -
 
 ```bash
 tunnel -i
@@ -25,13 +25,13 @@ tunnel -i
 
 ID is bound to hardware (MAC address) and the environment variables USER, HOME and HOSTNAME. Share it with your peers once and for all. Note: two users on the same machine are given separate node-IDs because their USER and HOME variables differ.
 
-**Server mode:** Expose your local port to peers with whom you share any secret string -
+**<u>Server mode</u>:** Expose your local port to peers with whom you share any secret string -
 
 ```bash
 tunnel [options] [-u] [-k <shared-secret>] <local-port>
 ```
 
-**Client mode:** Forward your local port to peer's exposed local port -
+**<u>Client mode</u>:** Forward your local port to peer's exposed local port -
 
 ```bash
 tunnel [options] [-u] [-k <shared-secret>] [-b <local-port>] <peer-ID:peer-port>
@@ -41,11 +41,11 @@ If no local-port is provided using the `-b` option, `tunnel` uses a random unuse
 
 Client and server must use the same secret to be able to connect with each other. The secret string may also be passed using the environment variable `TUNNEL_KEY`. Secret passed with `[-k]` takes precedence.
 
-`[-u]` flag denotes use of UDP instead of the default TCP. If used, it must be used by both the peers to be able to connect; viz. no TCP-UDP bridging possible, sorry.
+`[-u]` flag denotes use of UDP instead of the default TCP. If used, it must be used by both the peers.
 
 All logs are at stderr by default.
 
-**Options:** 
+**<u>Options</u>:** 
 
 ​	**-v**  Version
 
@@ -97,7 +97,7 @@ This program is simply an executable `bash` script depending on standard GNU too
 
 # Examples
 
-**SSH:**
+**<u>SSH</u>:**
 
 Peer A exposes local SSH port -
 
@@ -112,7 +112,7 @@ tunnel -b 67868 -k "${secret}" -l /dev/null "${peerA_ID}:22" # Daemon due to -l
 ssh -l "${login_name}" -p 67868 localhost 
 ```
 
-**IPFS:**
+**<u>IPFS</u>:**
 
 Let peer A has [IPFS-peer-ID](https://docs.libp2p.io/concepts/peer-id/): `12orQmAlphanumeric`. Her IPFS daemon listens at default UDP port 4001. She exposes it with -
 
@@ -159,23 +159,7 @@ If you so choose, you can also write your own relay to be used by `tunnel` using
 
 # See also
 
-[gsocket](https://github.com/hackerschoice/gsocket)
-
-[ipfs p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) with [circuit-relay enabled](https://gist.github.com/SomajitDey/7c17998825bb105466ef2f9cefdc6d43)
-
-[go-piping-duplex](https://github.com/nwtgck/go-piping-duplex)
-
-[pipeto.me](https://pipeto.me)
-
-[uplink](https://getuplink.de)
-
-[localhost.run](https://localhost.run/)
-
-[ngrok](https://ngrok.io)
-
-[sshreach.me](https://sshreach.me) (*free trial for limited period only*)
-
-[more](https://gist.github.com/SomajitDey/efd8f449a349bcd918c120f37e67ac00)
+[gsocket](https://github.com/hackerschoice/gsocket) ; [ipfs p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) with [circuit-relay enabled](https://gist.github.com/SomajitDey/7c17998825bb105466ef2f9cefdc6d43) ; [go-piping-duplex](https://github.com/nwtgck/go-piping-duplex) ; [pipeto.me](https://pipeto.me) ; [uplink](https://getuplink.de) ; [localhost.run](https://localhost.run/) ; [ngrok](https://ngrok.io) ; [sshreach.me](https://sshreach.me) (*free trial for limited period only*) ; [more](https://gist.github.com/SomajitDey/efd8f449a349bcd918c120f37e67ac00)
 
 **Notes:** 
 
