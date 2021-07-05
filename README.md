@@ -97,7 +97,7 @@ This program is simply an executable `bash` script depending on standard GNU too
 
 # Examples
 
-**<u>SSH</u>:**
+**<u>*SSH*</u>:**
 
 Peer A exposes local SSH port -
 
@@ -112,20 +112,46 @@ tunnel -b 67868 -k "${secret}" -l /dev/null "${peerA_ID}:22" # Daemon due to -l
 ssh -l "${login_name}" -p 67868 localhost 
 ```
 
-**<u>IPFS</u>:**
+**<u>*IPFS*</u>:**
 
-Let peer A has [IPFS-peer-ID](https://docs.libp2p.io/concepts/peer-id/): `12orQmAlphanumeric`. Her IPFS daemon listens at default UDP port 4001. She exposes it with -
+Let peer A has [IPFS-peer-ID](https://docs.libp2p.io/concepts/peer-id/): `12orQmAlphanumeric`. Her IPFS daemon listens at default TCP port 4001. She exposes it with -
 
 ```bash
-tunnel -uk "${swarm_key}" 4001
+tunnel -k "${swarm_key}" 4001
 ```
 
 Peer B now connects with peer A for [file-sharing](https://docs.ipfs.io/concepts/usage-ideas-examples/) or [pubsub](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-pubsub) or [p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) -
 
 ```bash
-port=$(TUNNEL_KEY="${swarm_key}" tunnel -ul /dev/null "${peerA_ID}:4001")
-ipfs swarm connect /ip4/127.0.0.1/tcp/${port}/quic/p2p/12orQmAlphanumeric
+port=$(TUNNEL_KEY="${swarm_key}" tunnel -l /dev/null "${peerA_ID}:4001")
+ipfs swarm connect /ip4/127.0.0.1/tcp/${port}/p2p/12orQmAlphanumeric
 ```
+
+**<u>*Remote Shell*</u>:**
+
+Suppose you would regularly need to launch commands at your workplace Linux box from your home machine. And you don't want to / can't use SSH over `tunnel` for some reason.
+
+At the workplace computer, expose some random local TCP port, e.g. 49090 and connect a shell to that port:
+
+```bash
+tunnel -l "/tmp/tunnel.log" -k "your secret" 49090 # Note the base64 node id emitted
+socat TCP-LISTEN:49090,reuseaddr,fork SYSTEM:'bash 2>&1'
+```
+
+Back at your  home:
+
+```bash
+tunnel -l "/dev/null" -b 5000 -k "your secret" "node_id_of_workplace:49090"
+rlwrap nc localhost 5000
+```
+
+Using [rlwrap](https://github.com/hanslub42/rlwrap) is not a necessity. But it sure makes the experience sweeter as it uses GNU Readline and remembers the input history (accessible with the up/down arrow keys similar to your local bash sessions).
+
+**<u>*Redis*</u>:**
+
+Need to connect to a remote [Redis](https://redis.io/) instance hosted by a peer or yourself? At the remote host, expose the TCP port that `redis-server` runs on (default: 6379), with `tunnel`.
+
+At your local machine, use `tunnel` to forward a TCP port to the remote port. Point your `redis-cli` at the forwarded local port.
 
 # Applications
 

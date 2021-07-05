@@ -160,8 +160,9 @@ version(){
   echo 0.0.0
 }; export -f version
 
-showhelp(){
+usage(){
   echo "
+  About: tunnel
   Client (Forwarder): tunnel [options] [-b <local-port>] <peer-ID:peer-port>
   Server (Forwardee): tunnel [options] <local-port>
 
@@ -200,7 +201,7 @@ showhelp(){
         tunnel -l /dev/null peer_ID:22 # This client will give forwarded local port at stdout
         ssh user@localhost -p port_obtained_from_client
   "
-}; export -f showhelp
+}; export -f usage
 
 about(){
   echo \
@@ -244,7 +245,7 @@ main(){
       l) logfile="${OPTARG}";;
       b) local_port="${OPTARG}";;
       i) genID ; exit;;
-      h) showhelp ; exit;;
+      h) usage ; exit;;
       v) version ; exit;;
       *) exit 1;;
     esac
